@@ -1,0 +1,31 @@
+
+# Entorno virtual
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Configuración local
+.env
+.idea/
+.vscode/
+
+# Archivos generados
+build/
+dist/
+*.spec
+
+# Datos experimentales: no subir imágenes por defecto
+data/
+datos/
+*.tiff
+*.tif
+*.ome.tif
+
+# Sistema operativo
+Thumbs.db
+.DS_Store
