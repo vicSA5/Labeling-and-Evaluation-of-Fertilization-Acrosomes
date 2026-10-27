@@ -1,4 +1,4 @@
-# lefAI
+# LEFA
 Clasificación manual del estado acrosómico (sin IA en esta versión).
 
     python -m venv .venv && .venv\Scripts\activate
