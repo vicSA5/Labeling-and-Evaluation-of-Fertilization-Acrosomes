@@ -1,0 +1,667 @@
+LEFAI — DOCUMENTO DE CONTEXTO Y PLAN DE DESARROLLO
+Versión: 1.0
+Fecha: 27/10/2026
+Estado: especificación inicial; algunos detalles deben validarse con imágenes reales y con los biotecnólogos.
+
+======================================================================
+1. RESUMEN DEL PROYECTO
+======================================================================
+
+Nombre: LEFA
+Nombre descriptivo: Labeling and Evaluation of Fertilization Acrosomes
+Tipo: aplicación de escritorio para Windows.
+Propósito: facilitar a biotecnólogos la visualización de imágenes microscópicas multicanal y la clasificación manual del estado acrosómico de espermatozoides.
+
+La primera versión (MVP) NO realiza clasificación automática mediante IA. Sirve para cargar imágenes, agrupar canales de una misma muestra, navegar entre muestras, asignar etiquetas, guardar el progreso y exportar resultados. El nombre lefAI deja abierta la posibilidad de incorporar funciones de IA más adelante, pero no debe afirmarse que ya existen.
+
+Principios:
+- No modificar los archivos originales.
+- No enviar imágenes ni metadatos a servicios externos.
+- Una clasificación por muestra lógica, no una por archivo de canal.
+- Guardado automático del progreso.
+- Funcionamiento robusto aunque falten canales o haya TIFF ilegibles.
+- Interfaz sencilla y utilizable principalmente con teclado.
+- Código modular y versionado con Git.
+
+======================================================================
+2. OBJETIVOS Y ALCANCE
+======================================================================
+
+Objetivos del MVP:
+1. Seleccionar una carpeta con imágenes TIFF.
+2. Reconocer los archivos y agrupar los canales por número de muestra.
+3. Mostrar un único canal cada vez con botones BF, G y B.
+4. Advertir cuando falte algún canal, sin descartar automáticamente la muestra.
+5. Ajustar contraste, zoom y desplazamiento sin alterar los archivos originales.
+6. Clasificar cada muestra con atajos de teclado y botones.
+7. Avanzar automáticamente tras clasificar.
+8. Corregir etiquetas y navegar entre muestras ya revisadas.
+9. Guardar y recuperar el progreso mediante CSV.
+10. Exportar las etiquetas y, opcionalmente, un ZIP con los archivos originales organizados por categoría.
+11. Empaquetar la aplicación como ejecutable de Windows (.exe).
+
+Fuera del alcance inicial:
+- Clasificación automática mediante IA.
+- Entrenamiento de modelos.
+- Edición o escritura sobre los TIFF originales.
+- Base de datos compleja o servidor.
+- Colaboración simultánea de varios usuarios.
+- Vista simultánea de todos los canales (la decisión actual es mostrar uno cada vez).
+
+======================================================================
+3. ENTRADA: ARCHIVOS Y CONVENCIÓN DE NOMBRES
+======================================================================
+
+La entrada disponible actualmente es una carpeta de archivos .tiff. Para una misma imagen, los archivos comparten un número y llevan un sufijo numérico que identifica el canal.
+
+Ejemplo:
+    8.1.tiff  -> imagen lógica 8, canal BF (brightfield/campo claro)
+    8.3.tiff  -> imagen lógica 8, canal G (verde; señal asociada al acrosoma)
+    8.4.tiff  -> imagen lógica 8, canal B (azul; señal asociada al núcleo)
+
+Otro ejemplo:
+    9.1.tiff
+    9.3.tiff
+    9.4.tiff
+
+El sistema debe interpretar los tres archivos de la imagen 8 como canales de UNA muestra lógica. No debe mostrar cada archivo como una muestra independiente ni pedir tres clasificaciones distintas.
+
+IMPORTANTE:
+- El patrón anterior está basado en los ejemplos disponibles y debe validarse con la carpeta real.
+- No asumir que todos los grupos contienen los tres canales.
+- No asumir que el orden de archivos devuelto por el sistema operativo es numérico.
+- Ordenar por el número de muestra de forma numérica (2 antes que 10).
+- Determinar el canal a partir del sufijo final antes de la extensión; por ejemplo, .1, .3 y .4.
+- Aceptar al menos la extensión .tiff; decidir si también se admitirá .tif.
+- Definir qué hacer con nombres que no encajen con el patrón: listarlos como no reconocidos y avisar; no asociarlos a una muestra por conjetura.
+- Si hay subcarpetas con archivos del mismo número, no agruparlos automáticamente sin comprobar la ruta. La identidad debe considerar la ruta relativa o avisar de colisiones.
+- Los archivos pueden ser TIFF sencillos o TIFF con metadatos de microscopía; comprobar los ejemplos reales antes de cerrar la implementación.
+
+El usuario seleccionará una carpeta raíz. El programa explorará sus archivos de manera controlada y construirá un inventario.
+
+Ejemplo de inventario interno:
+{
+    "8": {
+        "BF": "8.1.tiff",
+        "G": "8.3.tiff",
+        "B": "8.4.tiff",
+        "resultado": null
+    }
+}
+
+Este ejemplo es conceptual. En la implementación conviene almacenar rutas completas para abrir los archivos y rutas relativas para guardar una referencia portable en CSV.
+
+======================================================================
+4. AGRUPACIÓN Y DETECCIÓN DE CANALES
+======================================================================
+
+Para cada muestra lógica:
+- Identificar los canales encontrados.
+- Registrar cuáles faltan.
+- Mostrar solo los botones correspondientes a canales disponibles; los ausentes deben quedar deshabilitados o claramente marcados.
+- Mostrar un aviso visible, por ejemplo: "Falta el canal G para esta imagen".
+- Permitir ver los canales existentes y clasificar la muestra si el usuario lo decide.
+- No interpretar la falta de un canal como una etiqueta biológica.
+- No detener toda la aplicación por un archivo ausente o ilegible.
+
+Estados de una muestra:
+- Completa: tiene BF, G y B.
+- Incompleta: falta uno o más canales.
+- Con error: no se ha podido leer uno o varios archivos.
+- Pendiente: todavía no tiene etiqueta.
+- Clasificada: tiene etiqueta asignada.
+
+Una muestra puede ser incompleta y estar pendiente o clasificada. El estado de integridad de los canales es independiente de la etiqueta biológica.
+
+Al cargar la carpeta, mostrar un resumen:
+- Número de muestras lógicas detectadas.
+- Número de muestras completas.
+- Número de muestras incompletas.
+- Número de archivos no reconocidos.
+- Número de errores de lectura, cuando puedan detectarse sin cargar todos los archivos por completo.
+
+======================================================================
+5. FUNCIONAMIENTO DE LA APLICACIÓN
+======================================================================
+
+Flujo general:
+1. El usuario abre lefAI.
+2. Aparece la pantalla inicial de carga.
+3. Selecciona o arrastra una carpeta.
+4. La aplicación escanea nombres y agrupa archivos por muestra y canal.
+5. Se muestra el resumen y se informa de los archivos no reconocidos o canales ausentes.
+6. El usuario entra en el clasificador.
+7. Se muestra la primera muestra pendiente, o se ofrece reanudar un CSV anterior.
+8. El usuario cambia de canal con BF/G/B, ajusta contraste y visualiza la imagen.
+9. Asigna una categoría mediante botón o tecla rápida.
+10. La etiqueta se guarda automáticamente y se avanza a la siguiente muestra pendiente.
+11. Puede navegar hacia atrás y corregir cualquier etiqueta.
+12. Puede guardar/exportar CSV o generar un ZIP organizado por categorías.
+13. Puede cerrar la aplicación y reanudar más tarde importando el CSV.
+
+La carga de píxeles debe hacerse bajo demanda, no leyendo todas las imágenes completas al inicio. La interfaz no debe quedarse bloqueada durante operaciones de lectura potencialmente lentas. Para el MVP, implementar carga asíncrona cuando sea necesario y evitar optimizaciones complejas prematuras.
+
+======================================================================
+6. DISPOSICIÓN DE LA INTERFAZ
+======================================================================
+
+6.1 Pantalla inicial
+- Nombre/logo: lefAI.
+- Texto breve que explique que permite revisar y clasificar imágenes.
+- Zona "Arrastra aquí una carpeta o selecciona archivos".
+- Botón "Seleccionar carpeta".
+- Botón opcional para importar un CSV de progreso.
+- Resumen de los formatos admitidos y la convención de nombres esperada.
+- Mini tutorial de los atajos: 1, 2 y 3 para clasificar; flechas para navegar.
+- Selector de idioma ES/EN.
+- Créditos/información de versión.
+- Mensajes claros si no se encuentran archivos válidos.
+
+6.2 Pantalla de clasificación
+Diseño sugerido: visor principal a la izquierda y panel de control a la derecha.
+
+Barra superior:
+- Nombre o ruta abreviada de la carpeta activa.
+- Número de muestra actual y total (ejemplo: "8 / 120").
+- Indicador de progreso (ejemplo: "65 clasificadas, 55 pendientes").
+- Acción para volver a la pantalla inicial o cambiar de conjunto, con confirmación si hay operaciones pendientes.
+
+Zona central izquierda:
+- Visor de imagen grande.
+- Mostrar un único canal a la vez.
+- Botones BF, G y B cerca de la parte superior del visor.
+- Canal seleccionado claramente resaltado.
+- Si un canal falta, botón deshabilitado o marcado como ausente.
+- Zoom y desplazamiento/pan.
+- Ajuste de contraste de -100 a +100, con botón para restablecer.
+- Ajuste visual sin escribir cambios en el TIFF original.
+- Opcional: mostrar el nombre del archivo que se está visualizando.
+
+Panel derecho:
+- Número de muestra e identificador.
+- Lista breve de canales presentes/ausentes.
+- Aviso visible para muestras incompletas o con errores.
+- Sección de clasificación con tres botones grandes:
+    1 — Intacto
+    2 — Parcial / error (ETIQUETA PROVISIONAL; confirmar)
+    3 — Reaccionado
+- Indicador de la etiqueta actual si ya está clasificada.
+- Botón para quitar/reiniciar la etiqueta, sujeto a confirmación o acción clara.
+- Botones anterior/siguiente.
+- Estado: pendiente/clasificada.
+- Botón para exportar resultados.
+
+Barra inferior o lateral:
+- Navegación por flechas.
+- Opción para saltar a una muestra por número o elegir de una lista.
+- Filtro de pendientes/clasificadas/incompletas, si cabe en el MVP.
+- Botón para reanudar desde la primera pendiente.
+
+6.3 Comportamiento visual
+- Las etiquetas deben distinguirse con texto y no solo con color.
+- Los avisos deben ser legibles, sin bloquear innecesariamente el flujo.
+- Los cambios de canal no deben cambiar de muestra.
+- Las muestras incompletas no se deben ocultar silenciosamente.
+- Si el TIFF no se puede abrir, mostrar el error y permitir seguir con otra muestra.
+
+======================================================================
+7. CONTROLES Y ATAJOS
+======================================================================
+
+Canales:
+- Botón BF: mostrar el archivo del canal 1.
+- Botón G: mostrar el archivo del canal 3.
+- Botón B: mostrar el archivo del canal 4.
+
+Navegación:
+- Flecha izquierda: muestra anterior.
+- Flecha derecha: muestra siguiente.
+- Los botones anterior/siguiente deben tener la misma función.
+- La navegación no debe cambiar automáticamente la etiqueta de una muestra.
+
+Clasificación:
+- Tecla 1: Intacto.
+- Tecla 2: Parcial / error (pendiente de confirmar si es una categoría única).
+- Tecla 3: Reaccionado.
+- Los botones de la interfaz ejecutan las mismas acciones.
+- Tras asignar una etiqueta válida, guardar automáticamente y avanzar a la siguiente muestra pendiente.
+- No sobrescribir una etiqueta anterior de manera accidental sin una acción explícita; si se vuelve a clasificar una muestra ya etiquetada, permitir corregirla y guardar el nuevo valor.
+
+Contraste:
+- Deslizador de -100 a +100.
+- Valor inicial neutral.
+- Botón para restablecer.
+- El contraste es una transformación de visualización, nunca una modificación del archivo original.
+
+======================================================================
+8. CATEGORÍAS: DECISIÓN PENDIENTE
+======================================================================
+
+La propuesta actual es:
+1. Intacto
+2. Parcial / error
+3. Reaccionado
+
+Es necesario confirmar con los biotecnólogos qué significa "Parcial / error":
+A) una sola categoría que agrupa casos parciales y problemas de calidad;
+B) dos categorías diferentes, lo que modificaría las teclas y el CSV;
+C) una etiqueta biológica "Parcial" y un estado técnico separado "Error de imagen".
+
+Recomendación: separar los errores técnicos de lectura de las etiquetas biológicas. Un archivo corrupto o una imagen ilegible no debería clasificarse como si fuera un estado acrosómico. La categoría biológica definitiva debe acordarse con los expertos antes de cerrar el MVP.
+
+======================================================================
+9. CONTRASTE, VISUALIZACIÓN Y LECTURA TIFF
+======================================================================
+
+Tecnologías sugeridas:
+- tifffile para leer TIFF y metadatos compatibles.
+- NumPy para manejar matrices de píxeles y transformaciones.
+- PySide6 para la interfaz.
+- Pillow u otra herramienta solo si se demuestra necesaria; no añadir dependencias sin motivo.
+
+Requisitos del visor:
+- Leer la imagen de forma segura y detectar dimensiones inesperadas.
+- Investigar con archivos reales si son TIFF de 2D, multipágina, multicanal u OME-TIFF.
+- No asumir que todos los TIFF tienen la misma estructura interna.
+- Convertir la imagen a una representación visual compatible con el visor.
+- Manejar imágenes de 8/16 bits y tipos de datos que realmente aparezcan.
+- Normalizar o mapear intensidades para visualización sin perder el dato original.
+- Contraste ajustable con límites definidos y predecibles.
+- Evitar saturación o visualización negra por una conversión incorrecta de 16 bits a 8 bits.
+- Mantener zoom y desplazamiento dentro de una experiencia fluida.
+- Mostrar mensajes comprensibles para archivos no compatibles.
+- No asumir que el sufijo del archivo garantiza por sí solo el contenido real; confirmar la convención con el conjunto de datos.
+
+El ajuste visual debe trabajar sobre una copia en memoria o una transformación de renderizado. Nunca sobrescribir los TIFF originales.
+
+======================================================================
+10. GUARDADO Y RECUPERACIÓN DEL PROGRESO
+======================================================================
+
+El programa debe guardar automáticamente después de cada clasificación o corrección. También puede ofrecer un botón "Guardar ahora".
+
+Formato recomendado: CSV UTF-8, legible con Excel y herramientas de análisis.
+
+Campos sugeridos:
+- sample_id: identificador lógico de la muestra.
+- relative_path_bf: ruta relativa al directorio raíz del archivo BF, si existe.
+- relative_path_g: ruta relativa al archivo G, si existe.
+- relative_path_b: ruta relativa al archivo B, si existe.
+- label: etiqueta biológica.
+- status: pendiente/clasificada; puede derivarse de label, pero es útil si se define claramente.
+- missing_channels: canales ausentes.
+- classified_at: fecha y hora opcional.
+- file_signature: opcional, para detectar cambios de archivo; valorar hash o tamaño/fecha según rendimiento.
+
+Ejemplo conceptual:
+sample_id,relative_path_bf,relative_path_g,relative_path_b,label,missing_channels
+8,8.1.tiff,8.3.tiff,8.4.tiff,Intacto,
+9,9.1.tiff,,9.4.tiff,Reaccionado,G
+10,10.1.tiff,10.3.tiff,10.4.tiff,,
+
+Reglas:
+- Una fila por muestra lógica, no una fila por canal.
+- Las rutas se guardan relativas a la carpeta raíz para permitir reabrir el conjunto si se mueve de ubicación conservando su estructura.
+- La etiqueta vacía significa pendiente.
+- Los canales ausentes deben quedar registrados, pero no deben convertirse en etiquetas.
+- Al importar un CSV, validar sus columnas y mostrar errores de formato de manera comprensible.
+- Al reanudar, comparar muestras del CSV con las muestras actualmente detectadas.
+- Recuperar etiquetas coincidentes.
+- Advertir de muestras que estaban en el CSV y ya no están en la carpeta.
+- Advertir de nuevas muestras que no aparecen en el CSV.
+- Detectar ambigüedades, rutas duplicadas o cambios en archivos cuando sea posible.
+- No sobrescribir un CSV elegido por el usuario sin confirmación si el destino ya existe.
+- Definir dónde se guarda por defecto el CSV de progreso. Recomendación: ofrecer elegir una ruta y recordar el CSV activo durante la sesión; no escribir datos de progreso dentro de la carpeta original sin que el usuario lo sepa.
+
+======================================================================
+11. EXPORTACIÓN DE RESULTADOS
+======================================================================
+
+11.1 Exportación CSV
+- Exportar todas las muestras, incluidas las pendientes, dejando la etiqueta vacía para ellas.
+- Incluir identificadores, rutas y etiquetas.
+- Incluir canales ausentes o estado de integridad si es relevante.
+- Mantener un formato estable y documentado para análisis posteriores.
+
+11.2 Exportación ZIP opcional
+El usuario elige destino y nombre del ZIP. Estructura sugerida:
+clasificacion_YYYY-MM-DD/
+    Intactos/
+    Parcial_error/       (nombre provisional, según categorías definitivas)
+    Reaccionados/
+    clasificaciones.csv
+
+Reglas:
+- Copiar los archivos originales sin modificarlos.
+- Copiar a la categoría correspondiente todos los canales disponibles de cada muestra clasificada, conservando nombres o creando subcarpetas que eviten colisiones.
+- No incluir muestras pendientes en las carpetas de categorías.
+- Avisar de cuántas muestras pendientes se han excluido.
+- No descartar en silencio muestras incompletas; informar de que se exportan solo los archivos existentes.
+- Evitar sobrescribir nombres idénticos de archivos de distintas subcarpetas. Preservar estructura relativa o resolver colisiones de forma explícita.
+- Incluir el CSV de etiquetas en el ZIP.
+- Manejar falta de espacio, errores de copia y cancelación sin corromper el conjunto original.
+- El ZIP es una copia para distribución/análisis, no un lugar donde modificar los originales.
+
+======================================================================
+12. REQUISITOS FUNCIONALES
+======================================================================
+
+RF-01: seleccionar una carpeta de entrada.
+RF-02: admitir archivos TIFF según el patrón acordado.
+RF-03: identificar el número lógico de muestra y el sufijo de canal.
+RF-04: agrupar los canales BF, G y B por muestra.
+RF-05: ordenar las muestras numéricamente.
+RF-06: detectar y mostrar canales ausentes.
+RF-07: avisar de nombres no reconocidos y archivos ilegibles.
+RF-08: mostrar una sola imagen/canal cada vez.
+RF-09: cambiar entre canales BF, G y B sin cambiar de muestra.
+RF-10: ajustar contraste entre -100 y +100.
+RF-11: permitir zoom y desplazamiento.
+RF-12: mantener intactos los TIFF originales.
+RF-13: navegar entre muestras con botones y teclado.
+RF-14: clasificar mediante botones y teclas 1/2/3.
+RF-15: avanzar automáticamente tras clasificar.
+RF-16: volver atrás y corregir etiquetas.
+RF-17: mostrar pendientes y clasificadas.
+RF-18: guardar el progreso automáticamente.
+RF-19: exportar/importar CSV.
+RF-20: reanudar la sesión y mostrar la primera pendiente.
+RF-21: advertir sobre muestras nuevas, ausentes o modificadas al reanudar.
+RF-22: exportar opcionalmente un ZIP con archivos organizados por etiqueta.
+RF-23: no incluir pendientes en carpetas de categorías y avisar.
+RF-24: selector de idioma español/inglés.
+RF-25: funcionar sin conexión a internet.
+RF-26: empaquetar como ejecutable de Windows.
+RF-27: mantener la interfaz receptiva durante operaciones de lectura y exportación.
+RF-28: informar de errores sin cerrar toda la aplicación.
+
+======================================================================
+13. REQUISITOS NO FUNCIONALES
+======================================================================
+
+RNF-01 — Portabilidad: ejecutable de Windows probado en un ordenador sin Python instalado.
+RNF-02 — Rendimiento: leer imágenes bajo demanda y evitar cargar todas las matrices en memoria.
+RNF-03 — Robustez: un TIFF corrupto no debe cerrar la aplicación.
+RNF-04 — Integridad: nunca modificar los archivos de entrada.
+RNF-05 — Persistencia: guardar etiquetas con frecuencia suficiente para evitar perder trabajo.
+RNF-06 — Usabilidad: tareas principales accesibles mediante teclado.
+RNF-07 — Mantenibilidad: separar interfaz, lectura, agrupación, clasificación, progreso y exportación.
+RNF-08 — Compatibilidad: validar los TIFF reales antes de prometer compatibilidad con todas las variantes.
+RNF-09 — Privacidad: no subir imágenes ni metadatos a la nube.
+RNF-10 — Trazabilidad: identificar qué archivos componen cada muestra y detectar colisiones.
+RNF-11 — Claridad: mostrar mensajes de error accionables, no trazas técnicas al usuario final.
+RNF-12 — Pruebas: cubrir agrupación de canales, etiquetas, reanudación y exportación.
+
+======================================================================
+14. TECNOLOGÍAS Y ENTORNO
+======================================================================
+
+Recomendación inicial:
+- Python 3.12 como versión de referencia provisional; validar con las dependencias y el equipo.
+- PySide6: interfaz de escritorio.
+- tifffile: lectura de TIFF.
+- NumPy: procesamiento de matrices y visualización.
+- pytest: pruebas.
+- PyInstaller: empaquetado del ejecutable.
+
+Dependencias de desarrollo:
+- pytest.
+- PyInstaller.
+- Herramientas de formato/linting opcionales, solo si el equipo las adopta.
+
+Mantener requirements.txt con versiones probadas. Evitar depender de rutas absolutas de un ordenador. El proyecto debe funcionar desde una carpeta clonada en otra máquina.
+
+======================================================================
+15. ESTRUCTURA PROPUESTA DEL REPOSITORIO
+======================================================================
+
+lefAI/
+    .gitignore
+    README.md
+    requirements.txt
+    requirements-dev.txt
+    main.py
+    ui/
+        main_window.py
+        load_view.py
+        classification_view.py
+        widgets/
+            image_viewer.py
+            contrast_slider.py
+    core/
+        image_loader.py
+        channel_manager.py
+        contrast.py
+        classification.py
+        progress_manager.py
+        export_manager.py
+        models.py
+    tests/
+        test_channel_manager.py
+        test_image_loader.py
+        test_classification.py
+        test_progress.py
+        test_export.py
+    resources/
+        icons/
+        translations/
+    docs/
+        SPECIFICATION.txt
+
+La estructura es una propuesta, no una obligación. Puede simplificarse al empezar, pero las responsabilidades deben seguir separadas.
+
+Responsabilidades sugeridas:
+- main.py: punto de entrada.
+- ui/: ventanas, controles y presentación.
+- image_loader.py: lectura y validación de un archivo TIFF.
+- channel_manager.py: analizar nombres, descubrir archivos y construir muestras lógicas.
+- models.py: estructuras de datos compartidas (muestra, canal, etiqueta).
+- contrast.py: transformación visual de intensidades.
+- classification.py: reglas de etiquetas y cambios de clasificación.
+- progress_manager.py: CSV, reanudación y reconciliación de muestras.
+- export_manager.py: CSV final y ZIP.
+- tests/: pruebas automatizadas.
+
+La lógica central no debería depender directamente de widgets de PySide6. Esto permite probarla y, en el futuro, reutilizarla en otra interfaz.
+
+======================================================================
+16. PLAN DE DESARROLLO POR FASES
+======================================================================
+
+FASE 0 — Examinar datos y cerrar decisiones
+- Revisar un conjunto representativo de TIFF reales.
+- Confirmar el patrón de nombres y los canales.
+- Revisar dimensiones, tipos de píxel, páginas y metadatos.
+- Confirmar si hay subcarpetas y números repetidos.
+- Confirmar categorías definitivas con los biotecnólogos.
+- Definir si se aceptan .tif además de .tiff.
+Criterio de salida: documento breve con la convención real de entrada y casos especiales.
+
+FASE 1 — Inventario y agrupación de canales
+- Implementar exploración de carpetas.
+- Parsear nombres y separar ID/canal.
+- Agrupar por muestra lógica.
+- Ordenar numéricamente.
+- Detectar canales ausentes, duplicados y nombres no válidos.
+- Generar un informe textual de resultados.
+- Añadir pruebas unitarias con nombres completos, incompletos, mal formados y colisiones.
+Criterio de salida: un conjunto real produce un inventario correcto sin abrir aún la interfaz completa.
+
+FASE 2 — Prototipo del visor
+- Crear ventana PySide6.
+- Cargar una muestra y mostrar un canal.
+- Botones BF/G/B con estado de canal ausente.
+- Implementar conversión segura de datos a imagen visible.
+- Añadir contraste, zoom y desplazamiento.
+- Mostrar errores sin bloquear la aplicación.
+Criterio de salida: navegar manualmente por una pequeña carpeta y ver correctamente los canales.
+
+FASE 3 — Flujo de clasificación
+- Botones de etiquetas y teclas 1/2/3.
+- Navegación anterior/siguiente.
+- Autoavance tras clasificar.
+- Corregir una etiqueta.
+- Mostrar contador y estado pendiente/clasificada.
+- Confirmar qué hacer al llegar al final.
+Criterio de salida: clasificar y revisar un lote pequeño con teclado y ratón.
+
+FASE 4 — Guardado y recuperación
+- Definir CSV estable.
+- Guardado automático tras cada cambio.
+- Importar CSV previo.
+- Emparejar por ID y rutas relativas.
+- Advertir de muestras nuevas, ausentes o cambiadas.
+- Reanudar desde la primera pendiente.
+- Probar interrupciones y cierres inesperados.
+Criterio de salida: cerrar y volver a abrir sin perder etiquetas ya guardadas.
+
+FASE 5 — Exportación y experiencia final
+- Exportar CSV.
+- Crear ZIP opcional con archivos originales por categoría.
+- Gestionar pendientes, canales ausentes, colisiones y errores de copia.
+- Añadir ES/EN.
+- Mejorar mensajes, tutorial y accesibilidad.
+Criterio de salida: exportación comprobada comparando los archivos copiados con los originales.
+
+FASE 6 — Pruebas y distribución
+- Pruebas automatizadas y manuales.
+- Probar carpetas grandes y TIFF con formatos reales.
+- Revisar consumo de memoria y fluidez.
+- Empaquetar con PyInstaller.
+- Probar el .exe en un Windows sin Python.
+- Documentar instalación, uso, limitaciones y solución de problemas.
+Criterio de salida: una persona del laboratorio puede instalar/abrir, cargar, clasificar, cerrar, reanudar y exportar siguiendo el README.
+
+======================================================================
+17. PLAN INICIAL DE CINCO DÍAS (ORIENTATIVO)
+======================================================================
+
+Día 1:
+- Revisar TIFF reales y convención de nombres.
+- Crear repositorio, entorno virtual y .gitignore.
+- Implementar prototipo de agrupación.
+
+Día 2:
+- Probar agrupación y canales ausentes.
+- Crear ventana básica y carga de carpeta.
+- Mostrar resumen del inventario.
+
+Día 3:
+- Implementar visor, botones BF/G/B y navegación.
+- Añadir contraste básico y manejo de errores.
+
+Día 4:
+- Añadir etiquetas, atajos, autoavance y corrección.
+- Crear primeras pruebas de clasificación.
+
+Día 5:
+- Implementar CSV y guardado automático básico.
+- Probar una sesión de principio a fin.
+- Anotar tareas pendientes para las siguientes iteraciones.
+
+El plazo es orientativo. No sacrificar la lectura correcta de los datos ni la persistencia por cumplir cinco días. ZIP, traducción completa y empaquetado pueden terminarse en una fase posterior.
+
+======================================================================
+18. PRUEBAS Y CRITERIOS DE ACEPTACIÓN
+======================================================================
+
+Pruebas mínimas:
+- Una muestra con BF/G/B se agrupa en una sola entrada.
+- Una muestra con solo BF y B aparece como incompleta y avisa de que falta G.
+- Un archivo con nombre inválido no se asocia silenciosamente a otra muestra.
+- Las muestras 2 y 10 se ordenan correctamente.
+- Dos archivos con la misma identidad en subcarpetas distintas no se mezclan sin aviso.
+- El usuario puede alternar canales sin cambiar de muestra.
+- Los canales ausentes no provocan un cierre inesperado.
+- Una etiqueta asignada se guarda en CSV.
+- La corrección de una etiqueta actualiza el CSV.
+- Reabrir/importar el CSV restaura etiquetas previas.
+- Una nueva muestra no presente en el CSV se marca como nueva.
+- Una muestra del CSV que ya no existe genera una advertencia.
+- El ZIP contiene los canales disponibles de cada muestra clasificada.
+- Las muestras pendientes no se colocan en carpetas de categorías.
+- Los TIFF originales no se alteran.
+- Un archivo ilegible no impide clasificar el resto.
+- El ejecutable funciona en un equipo de prueba sin Python instalado.
+
+======================================================================
+19. GIT Y TRABAJO EN EQUIPO
+======================================================================
+
+No subir:
+- .venv/
+- imágenes experimentales originales, salvo autorización explícita y una decisión consciente.
+- archivos privados o credenciales.
+- archivos temporales, builds o ejecutables grandes sin motivo.
+
+Sí subir:
+- código fuente.
+- README y documentación.
+- requirements.txt y requirements-dev.txt.
+- pruebas automatizadas.
+- pequeños fixtures sintéticos para tests, si no contienen datos sensibles.
+- configuración necesaria para reproducir el desarrollo.
+
+Flujo básico:
+1. Crear una rama por funcionalidad.
+2. Hacer commits pequeños y descriptivos.
+3. Ejecutar pruebas antes de integrar.
+4. Abrir pull request o revisar cambios antes de fusionar si colaboran varias personas.
+5. No versionar resultados ni datos reales por defecto.
+
+Ejemplos de commits:
+- feat: agrupar archivos TIFF por canal
+- feat: mostrar advertencias de canales ausentes
+- feat: añadir atajos de clasificación
+- fix: corregir orden numérico de muestras
+- test: añadir pruebas de reanudación CSV
+- docs: documentar convención de entrada
+
+======================================================================
+20. DECISIONES PENDIENTES Y RIESGOS
+======================================================================
+
+Pendiente de confirmar:
+1. ¿"Parcial" y "error" son una sola categoría o dos? Recomendación: separar el error técnico de la etiqueta biológica.
+1. Separamos en 2, sería 1 y 2 para intacto/reaccionado y 3 y 4 para parcial o en duda y 4 para un error por ejemplo de la imagen
+2. ¿Se aceptarán .tif además de .tiff?
+2. vale
+3. ¿Puede haber subcarpetas y números de muestra repetidos?
+3. NO
+4. ¿Todos los archivos son imágenes 2D o algunos son multipágina/multidimensionales?
+4. 2D
+5. ¿Se debe permitir clasificar una muestra si falta el canal G o cualquier otro? Decisión actual: sí, mostrar disponibles y advertir.
+6. ¿Qué información adicional necesita el CSV para análisis científico?
+7. ¿La exportación ZIP debe conservar la estructura original de carpetas o copiar todos los canales directamente dentro de cada categoría? Recomendación: conservar estructura.
+8. ¿El CSV de progreso se crea automáticamente en una ruta elegida por el usuario o se pide al comenzar? Decidir antes de cerrar la persistencia.
+csv lo metería lo pondría para descargar junto a la app, ósea q le puedas dar a un botón para descargar el csv en ese momento
+9. ¿Se requiere una lista/filtro de muestras incompletas para revisarlas al final?
+10. ¿Qué comportamiento exacto se espera al llegar a la última muestra? Cuando llegue a la última q ponga un mini resumen de como ha quedado y q salga para descargar
+
+Riesgos principales:
+- Convención de nombres distinta a la supuesta.
+- Lectura incorrecta de TIFF de 16 bits o multidimensionales.
+- Colisiones de nombres y mezcla de muestras.
+- Pérdida de progreso por una estrategia de guardado insuficiente.
+- Confundir problemas técnicos de imagen con una categoría biológica.
+- Exportar archivos equivocados o modificar originales por accidente.
+
+Mitigación: validar primero los archivos reales, diseñar las pruebas alrededor de los casos incompletos y mantener los originales en solo lectura desde el punto de vista de la aplicación.
+
+======================================================================
+21. DEFINICIÓN DE MVP TERMINADO
+======================================================================
+
+El MVP se considera terminado cuando un usuario del laboratorio puede:
+1. Abrir LEFA en Windows.
+2. Seleccionar una carpeta con archivos TIFF.
+3. Ver cómo se agrupan por número y canal.
+4. Identificar claramente los canales ausentes.
+5. Ver BF, G o B individualmente.
+6. Ajustar contraste y navegar entre muestras.
+7. Asignar y corregir etiquetas usando botones o teclado.
+8. Cerrar y reanudar sin perder las etiquetas guardadas.
+9. Exportar un CSV correcto y, si se implementa en la primera entrega, un ZIP con los archivos originales organizados.
+10. Trabajar sin conexión y sin modificar los archivos de entrada.
+
+FIN DEL DOCUMENTO
