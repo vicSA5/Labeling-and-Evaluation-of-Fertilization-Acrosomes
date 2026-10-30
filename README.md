@@ -1,5 +1,5 @@
 # LEFA
-Clasificación manual del estado acrosómico (sin IA en esta versión).
+Clasificación manual del estado acrosómico.
 
     python -m venv .venv && .venv\Scripts\activate
     pip install -r requirements-dev.txt

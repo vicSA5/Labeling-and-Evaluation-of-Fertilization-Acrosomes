@@ -10,6 +10,9 @@ from core import progress
 from core.channel_manager import scan
 from core import export_manager
 
+import sys, ctypes
+from PySide6.QtGui import QIcon
+
 class Viewer(QGraphicsView):
     def __init__(self):
         super().__init__()
@@ -293,8 +296,19 @@ class MainWindow(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "ZIP", f"No se pudo crear el ZIP: {e}")
 
+def resource(rel):
+    """Ruta a un recurso, válida en desarrollo y dentro del .exe de PyInstaller."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return str(base / rel)
+
 
 def run():
+    if sys.platform == "win32":  # sin esto, la barra de tareas muestra el icono de Python
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("rovit.lefa")
     app = QApplication([])
+    icon = QIcon()
+    for s in (16, 32, 48, 64, 128, 256):
+        icon.addFile(resource(f"resources/logo{s}.ico"))
+    app.setWindowIcon(icon)
     w = MainWindow(); w.show()
     app.exec()
