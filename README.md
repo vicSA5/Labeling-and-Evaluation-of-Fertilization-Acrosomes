@@ -1,6 +1,4 @@
-# LEFA
-
-**Labeling and Evaluation of Fertilization Acrosomes**
+# Labeling and Evaluation of Fertilization Acrosomes
 
 Aplicación de escritorio para Windows que permite revisar imágenes de microscopía multicanal y clasificar manualmente el estado acrosómico de espermatozoides. Esta versión **no incluye clasificación automática por IA**.
 
